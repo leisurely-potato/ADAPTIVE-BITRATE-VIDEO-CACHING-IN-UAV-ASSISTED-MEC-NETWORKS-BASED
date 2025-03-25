@@ -96,4 +96,48 @@
 
     (h) $E_h + \sum_f x_f E^, + \sum_i \left( E_c + E_t + E_b \right) \leq E_{\max}.$ **（能耗约束：UAV 的总能耗（悬停能耗 + 缓存能耗 + 数据传输/转码能耗））**
 
-   2. 
+   2. 置信集构造
+    在用户请求概率分布不确定的情况下，我们使用 **分布式鲁棒优化（DRO）** 思想，通过历史数据构造一个置信集，用于稳健决策。
+
+      1. 构造目标
+        我们无法获得真实的用户请求分布 \(\mathbb{P}\)，只能通过历史数据得到参考分布 \(\mathbb{P}_0\)。于是我们构造一个置信集 \(\mathcal{D}\)，包含所有“与 \(\mathbb{P}_0\) 接近”的分布：
+
+        \[
+        \mathcal{D} = \left\{ \mathbb{P} : d(\mathbb{P}, \mathbb{P}_0) \leq \theta \right\}
+        \]
+
+        - \(d(\cdot, \cdot)\)：衡量两个分布之间差异的距离函数；
+        - \(\theta\)：容差值，决定置信集的大小。
+        2. ζ-结构概率度量（ζ-structure probability metrics）
+
+        用于衡量 \(\mathbb{P}\) 和 \(\mathbb{P}_0\) 的差异，引入以下5种主流度量方式：
+
+        | 距离度量方式             | 记号           | 特性说明 |
+        |--------------------------|----------------|----------|
+        | Kantorovich              | \(d_K\)        | 类似 Wasserstein 距离，有物理意义，适用于一般情况 |
+        | Fortet-Mourier           | \(d_{FM}\)     | Kantorovich 的推广形式 |
+        | Kolmogorov（Uniform）    | \(d_U\)        | 适合用来比较CDF，适用于一维变量 |
+        | Total Variation（TV）    | \(d_{TV}\)     | 测量两个分布概率最大差异 |
+        | Bounded Lipschitz        | \(d_{BL}\)     | 综合 Lipschitz 约束与最大幅度 |
+        3. 参考分布 \(\mathbb{P}_0\) 的选择
+        使用 **经验分布（Empirical Distribution）** 进行构造：
+        \[
+        p_0^f = \frac{1}{F'} \sum_{i=1}^{F'} \delta_{\xi_i}(f)
+        \]
+
+        - \(F'\)：历史数据样本数；
+        - \(\delta_{\xi_i}(f)\)：指示函数，表示样本 \(\xi_i\) 是否为事件 \(f\)。
+        4. 容差值 \(\theta\) 的计算与收敛性分析
+
+        引入置信水平 \(\beta\)（如 95%），确保 \(\mathbb{P}\) 落在置信集 \(\mathcal{D}\) 中的概率不低于 \(\beta\)。在不同距离度量下，容差值 \(\theta\) 的计算如下：
+
+        | 距离类型 | 容差值计算公式 | 特性说明 |
+        |-----------|----------------|----------|
+        | **Kantorovich** | \(\theta = F \sqrt{\frac{2}{F'} \ln \frac{1}{1-\beta}}\) | 适合通用情形 |
+        | **Fortet-Mourier** | \(\theta = F \Lambda \sqrt{\frac{2}{F'} \ln \frac{1}{1-\beta}}\) | \(\Lambda = \max\{1, F^{p-1}\}\) |
+        | **Kolmogorov (U)** | \(\theta = \sqrt{ \frac{1}{2F'} \ln \frac{2}{1-\beta} }\) | 适合一维场景 |
+        | **Total Variation** | \(\theta = \sqrt{ \frac{1}{2F'} \chi^2_{F-1, 1-\beta} }\) | 与卡方分布有关 |
+        | **Bounded Lipschitz** | 同 Kantorovich | 保守但稳定可靠 |
+
+    
+   3. 
