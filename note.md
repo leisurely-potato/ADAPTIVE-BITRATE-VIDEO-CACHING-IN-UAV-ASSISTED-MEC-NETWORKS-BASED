@@ -20,7 +20,9 @@
           3. 总路径损耗
             $$PL_{u_i} = P_r(u_i, \text{LoS}) PL^{LoS}_{u_i} + P_r(u_i, \text{NLoS}) PL^{NLoS}_{u_i}$$
           4. 传输速率
-               $$R_{u_i} = \frac{W_u}{U} \cdot \log_2 \left(1 + \frac{P_u \cdot 10^{-PL_{u_i} / 10}}{N_0^m \cdot \frac{W_u}{U}} \right)$$
+               $$
+                R_{u_i} = \frac{W_u}{U} \cdot \log_2 \left(1 + \frac{P_u \cdot 10^{-PL_{u_i} / 10}}{N_0^m \cdot \frac{W_u}{U}} \right)
+               $$
        2. BS-UAV
           1. 路径损耗
           $$
@@ -73,7 +75,7 @@
    
 2. 问题构建
    1. 问题公式化
-   由于用户请求的到达是不确定的，其概率分布未知，因此很难提前精准制定缓存策略。为此，作者引入分布鲁棒优化（DRO）方法，不假设唯一的真实分布，而是通过历史数据**构建一个包含多个可能分布的置信集合 D**，并在其中**寻找最坏情况下的最优策略**，以实现“**风险规避（risk-averse）**”。最终的目标是**在能耗受限的条件下，最小化系统总体延迟，同时联合优化缓存放置和视频传输调度策略**。
+   由于用户请求的到达是不确定的，其概率分布未知，因此很难提前精准制定缓存策略。为此，作者引入分布鲁棒优化（DRO）方法，不假设唯一的真实分布，而是通过历史数据**构建一个包含多个可能分布的置信集合 D**，并在其中**寻找最坏情况下的最优策略**，以实现“**风险规避（risk-averse）**”。最终的目标是**在能耗受限的条件下，最小化系统总体延迟，同时联合优化缓存放置和视频传输调度策略**。（在请求分布P不确定的前提下，找出一套缓存策略（X）和传输调度策略（Y），使得最坏情况下的期望系统延迟最小，并满足能耗不超过最大限制。）
 
     $$
     \min_{\mathbf{X}, \mathbf{Y}} \max_{\mathbf{P} \in \mathcal{D}} \sum_i \mathbb{E}_{\mathbb{P}} \left[ \Psi(\mathbf{X}, \mathbf{Y}, \xi_i) \right]
@@ -140,4 +142,177 @@
         | **Bounded Lipschitz** | 同 Kantorovich | 保守但稳定可靠 |
 
     
-   3. 
+3. 分布鲁棒性延迟优化算法设计
+   1. 算法设计
+   问题1：什么是弱对偶性？
+   答：对偶问题的最大值小于原问题的最小值，即对偶问题的最优值是原问题最优值的下界。
+     1. 将第18式中复杂的一个约束 (18d) 拆成两个更易处理的约束
+     
+    $$ 
+     y_t(\xi_i) \leq \sum_f \min \left\{ f \bmod N, \sum_{j = \min(f+1, F)}^{\min(f', F)} x_j \right\} \cdot R_f r_{ef}(\xi_i), \quad \forall i, 
+     $$
+
+     拆分为
+
+    $$
+     y_t(\xi_i^f) \leq (f \mod N) \cdot R_f,\quad \forall i, f \\
+     y_t(\xi_i^f) \leq \left( \sum_{j = \min(f+1, F)}^{\min(f', F)} x_j \right) \cdot R_f,\quad \forall i, f
+     $$
+
+     2. 先解决内层最大化问题
+    $$
+     \max_{P} \sum_{i} \sum_{f} p_f \cdot \Psi(X, Y, \xi_f^i) \\
+    \sum_{f} p_f = 1 \\
+    p_f \geq 0, \quad \forall f \\
+    P \in \mathcal{D} \quad 
+     $$
+
+     3. 表示$P \in \mathcal{D}$
+     作者用了几种不同的ζ-结构概率度量（Kantorovich、Total Variation等），这里以 Kantorovich 距离为例：
+         **原始问题（内层最大化）**：
+        最大化在不确定分布 \( P = \{p_f\} \) 下的期望延迟：
+        $$
+            \max_{P \in D_K} \sum_{f=1}^F p_f \Psi_f
+        $$
+        其中：
+        - \( \Psi_f = \sum_i \Psi(X, Y, \xi^i_f) \)：是固定的延迟值（给定 X 和 Y 后）
+        - \( P \in D_K \)：表示 \( P \) 属于 **Kantorovich 距离小于等于 \( \theta_K \)** 的集合
+
+        再加上两个基本的概率分布约束：
+
+        - \( \sum_f p_f = 1 \)
+        - \( p_f \geq 0 \)
+
+        **Kantorovich 距离定义：**
+            集合 \( D_K \) 被定义为：
+            $$
+                \sup_{\|h\|_L \leq 1} \sum_f h_f (p_f - p_f^0) \leq \theta_K
+            $$
+
+        **拉格朗日函数构建的关键思想：**
+            我们要把上面的约束变成等价的“惩罚项”，加到目标函数中形成 Lagrangian。
+            所以我们对每个约束引入对应的拉格朗日乘子（对偶变量）：
+
+        | 原始约束 | 拉格朗日乘子 | 含义 |
+        |----------|----------------|------------------------|
+        | \( \sum_f p_f = 1 \) | \( \nu_f^K \) | 概率归一性 |
+        | \( p_f \geq 0 \) | \( \rho_f^K \geq 0 \) | 非负性 |
+        | \( \sup_{\|h\|_L \leq 1} \sum_f h_f (p_f - p_f^0) \leq \theta_K \) | \( \varphi_K \geq 0 \) | Kantorovich 距离约束 |
+        | \( A h \leq b \)（用于表示 \( \|h\|_L \leq 1 \)） | \( \lambda_l^K \geq 0 \) | Kantorovich 结构化的线性约束 |
+
+
+
+        **写出 Lagrangian 表达式：**
+            原始目标为：
+            $$
+                \sum_f p_f \Psi_f
+            $$
+            加上惩罚项后得到：
+            $$
+                \mathcal{L} = 
+                \sum_f p_f \Psi_f 
+                - \sum_f \nu_f^K (p_f - 1)
+                - \sum_f \rho_f^K (-p_f)
+                + \varphi_K \left( \sum_f h_f (p_f - p_f^0) - \theta_K \right)
+            $$
+            整理后得到：
+            $$
+                \mathcal{L} = \sum_f p_f (\Psi_f - \nu_f^K + \rho_f^K + \varphi_K h_f) 
+                - \sum_f \varphi_K h_f p_f^0 + \sum_f \nu_f^K - \varphi_K \theta_K
+            $$
+
+
+        **对偶目标函数：**
+            对上式关于 \( p_f \) 最大化，对 \( h \) 最小化，可得最终对偶目标函数：
+            $$
+                \min_{\delta_K, \varphi_K, \nu_f^K, \lambda_l^K, \rho_f^K} 
+                \left( \delta_K + \theta_K \varphi_K - \sum_f \nu_f^K p_f^0 \right)
+            $$
+
+        
+
+        **对偶约束：**
+
+        **(a)** 对应 \( p_f \) 的系数一致性约束：
+            $$
+            - \sum_i \Psi(X, Y, \xi^i_f) + \delta_K - \nu_f^K - \rho_f^K \geq 0, \quad \forall f
+            $$
+            **(b)** Kantorovich 平滑性结构约束：
+            $$
+            \varphi_K b_l + \sum_f \nu_f^K a_{lf} - \lambda_l^K \geq 0, \quad \forall l
+            $$
+            **(c)** 非负性约束：
+            $$
+            \varphi_K \geq 0, \quad \rho_f^K \geq 0, \quad \lambda_l^K \geq 0, \quad \forall f, l
+            $$
+
+
+     4. 
+     
+
+   
+
+
+   2. W_b
+4. 附录
+   1. **对偶问题的导出**
+
+
+   2. 
+   <!-- 1. **怎么从原始问题推导出它的对偶问题？**
+      1.  **原始问题：**
+        $$
+            \max_{h} \sum_{f=1}^F h_f p_f - \sum_{f=1}^F h_f p^0_f
+        $$
+        约束如下：
+        $$
+            \sum_{f=1}^F a_{lf} h_f \leq b_l, \quad \forall l = 1,2,...,L
+        $$
+        这是一个标准的 **线性规划最大化问题**。
+      2. **第一步：整理为标准形式**
+
+        - **目标函数**：最大化 \( c^\top h \)，其中  
+        \( c_f = p_f - p^0_f \)
+
+        - **约束矩阵 A**：每一行是一个  
+        \( a_l = (a_{l1}, a_{l2}, ..., a_{lF}) \)
+
+        - **约束条件**：  
+        \( A h \leq b \)
+      3. **第二步：构建对偶问题（根据线性规划对偶理论）**
+        原始问题是：
+        $$
+            \begin{aligned}
+            \max_{h} \quad & c^\top h \\
+            \text{s.t.} \quad & A h \leq b
+            \end{aligned}
+        $$
+        对偶问题的标准形式如下：
+        $$
+            \begin{aligned}
+            \min_{u \geq 0} \quad & b^\top u \\
+            \text{s.t.} \quad & A^\top u = c
+            \end{aligned}
+        $$
+        代入原始问题：
+           - 变量 \( h_f \) 是原问题的变量  
+            - 对偶变量是 \( u_l \)，每个对应一个约束  
+            - \( c_f = p_f - p^0_f \)，所以右边条件是：
+            $$
+                \sum_{l=1}^L u_l a_{lf} = p_f - p^0_f, \quad \forall f
+            $$
+            即：
+            $$
+                \sum_{l} u_l a_{lf} - p_f + p^0_f = 0, \quad \forall f
+            $$
+            最终目标函数是：
+            $$
+                \min_{u_l \geq 0} \sum_{l} u_l b_l
+            $$
+        获得了对偶问题：
+        $$\begin{aligned}
+        \min_{u_l} \quad & \sum_{l} u_l b_l \\
+        \text{s.t.} \quad & \sum_{l} u_l a_{lf} - p_f + p^0_f = 0, \quad \forall f \\
+        & u_l \geq 0
+        \end{aligned}$$ -->
+    
